@@ -128,6 +128,34 @@ preflight() {
 }
 
 # ============================================================================
+# Phase 0.5: Seed default profile (before cloning so clones inherit skills)
+# ============================================================================
+
+seed_default() {
+  echo -e "${CYAN}${BOLD}Phase 0.5: Seeding default profile${NC}"
+
+  if [ "$DRY_RUN" = true ]; then
+    echo "  [dry-run] Would install ponytail to default (inherited by clones)"
+    return
+  fi
+
+  # Install ponytail ONCE on default. Clones created in Phase 1 inherit
+  # all skills from default. This avoids per-profile downloads + scans.
+  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
+  local ponytail_dir="$HERMES_HOME/skills/ponytail"
+
+  if [ -f "$ponytail_dir/SKILL.md" ]; then
+    echo -e "  ${YELLOW}⊘ default: ponytail already installed${NC}"
+  else
+    hermes skills install "$ponytail_url" --yes 2>/dev/null && \
+      echo -e "  ${GREEN}✓ default: ponytail installed (clones will inherit)${NC}" || \
+      echo -e "  ${YELLOW}⚠ default: ponytail install failed${NC}"
+  fi
+
+  echo ""
+}
+
+# ============================================================================
 # Phase 1: Profile Creation
 # ============================================================================
 
@@ -235,22 +263,32 @@ configure_toolsets() {
 # ============================================================================
 
 install_skills() {
-  echo -e "${CYAN}${BOLD}Phase 4: Installing skills${NC}"
+  echo -e "${CYAN}${BOLD}Phase 4: Reconciling skills${NC}"
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  [dry-run] Would install ponytail to all profiles"
+    echo "  [dry-run] Would reconcile ponytail to any missing profiles"
     return
   fi
 
-  # Ponytail to all profiles
-  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
-  for role in default "${PROFILES[@]}"; do
-    if hermes -p "$role" skills list 2>/dev/null | grep -qw "ponytail"; then
-      echo -e "  ${YELLOW}⊘ $role: ponytail already installed${NC}"
+  # Ponytail was seeded on default in Phase 0.5. Clones created in Phase 1
+  # inherited it. For re-runs where profiles already existed (pre-seed),
+  # copy the skill dir directly — no download, no scan.
+  local ponytail_src="$HERMES_HOME/skills/ponytail"
+
+  if [ ! -d "$ponytail_src" ]; then
+    echo -e "  ${YELLOW}⚠ ponytail not found on default — skipping reconcile${NC}"
+    echo ""
+    return
+  fi
+
+  for role in "${PROFILES[@]}"; do
+    local dst="$(profile_path "$role")/skills/ponytail"
+    if [ -d "$dst" ]; then
+      echo -e "  ${YELLOW}⊘ $role: ponytail already present${NC}"
     else
-      hermes -p "$role" skills install "$ponytail_url" --yes 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: ponytail installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url --yes)${NC}"
+      cp -r "$ponytail_src" "$dst" && \
+        echo -e "  ${GREEN}✓ $role: ponytail copied (no scan)${NC}" || \
+        echo -e "  ${YELLOW}⚠ $role: ponytail copy failed${NC}"
     fi
   done
 
@@ -265,32 +303,50 @@ install_mcps() {
   echo -e "${CYAN}${BOLD}Phase 5: Installing MCP servers${NC}"
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  [dry-run] Would install Context7 + GitHub MCPs"
+    echo "  [dry-run] Would write MCP configs directly to config.yaml"
     return
   fi
 
+  # Write MCP configs directly to each profile's config.yaml.
+  # Skips the connection probe that `hermes mcp add` runs (saves ~3 min).
+  # MCPs connect on first session use instead.
+  local context7_config='mcp_servers:
+  context7:
+    command: "npx"
+    args: ["-y", "@upstash/context7-mcp"]
+    enabled: false
+    connect_timeout: 90'
+
+  local github_config='mcp_servers:
+  github:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    enabled: false
+    connect_timeout: 90'
+
   # Context7 for architect + builder
   for role in architect builder; do
-    if hermes -p "$role" mcp list 2>/dev/null | grep -qw "context7"; then
+    local cfg="$(profile_path "$role")/config.yaml"
+    if grep -qw "context7" "$cfg" 2>/dev/null; then
       echo -e "  ${YELLOW}⊘ $role: context7 already configured${NC}"
     else
-      echo "y" | hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" --connect-timeout 90 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: context7 MCP added${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: context7 MCP install failed${NC}"
+      echo "$context7_config" >> "$cfg"
+      echo -e "  ${GREEN}✓ $role: context7 MCP config written${NC}"
     fi
   done
 
-  # GitHub MCP for default, vcm, reviewer (not in catalog — install directly via npx)
+  # GitHub MCP for default, vcm, reviewer
   for role in default vcm reviewer; do
-    if hermes -p "$role" mcp list 2>/dev/null | grep -qw "github"; then
-      echo -e "  ${YELLOW}⊘ $role: github MCP already configured${NC}"
+    local cfg="$(profile_path "$role")/config.yaml"
+    if grep -qw "github" "$cfg" 2>/dev/null; then
+      echo -e "  ${YELLOW}⊘ $role: github already configured${NC}"
     else
-      echo "y" | hermes -p "$role" mcp add github --command "npx" --args "-y @modelcontextprotocol/server-github" --connect-timeout 90 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: github MCP added${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (set GITHUB_PERSONAL_ACCESS_TOKEN in .env)${NC}"
+      echo "$github_config" >> "$cfg"
+      echo -e "  ${GREEN}✓ $role: github MCP config written${NC}"
     fi
   done
 
+  echo -e "  ${CYAN}MCPs will connect on first session. Set GITHUB_PERSONAL_ACCESS_TOKEN in .env for GitHub MCP.${NC}"
   echo ""
 }
 
@@ -544,6 +600,7 @@ main() {
   fi
 
   preflight
+  seed_default
   create_profiles
   install_souls
   configure_toolsets
