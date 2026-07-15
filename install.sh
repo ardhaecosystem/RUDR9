@@ -238,21 +238,40 @@ install_skills() {
   echo -e "${CYAN}${BOLD}Phase 4: Installing skills${NC}"
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  [dry-run] Would install ponytail to all profiles"
+    echo "  [dry-run] Would install ponytail (once → symlink to all profiles)"
     return
   fi
 
-  # Ponytail to all profiles
+  # Ponytail: install ONCE on default, then symlink to all other profiles.
+  # Saves ~3.5 min (avoids 7 redundant downloads + security scans).
   local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
-  for role in default "${PROFILES[@]}"; do
-    if hermes -p "$role" skills list 2>/dev/null | grep -qw "ponytail"; then
-      echo -e "  ${YELLOW}⊘ $role: ponytail already installed${NC}"
-    else
-      hermes -p "$role" skills install "$ponytail_url" --yes 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: ponytail installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url --yes)${NC}"
-    fi
-  done
+  local default_skills="$HERMES_HOME/skills"
+  local ponytail_dir="$default_skills/ponytail"
+
+  # Install once on default (this runs the security scan once)
+  if [ -f "$ponytail_dir/SKILL.md" ]; then
+    echo -e "  ${YELLOW}⊘ default: ponytail already installed${NC}"
+  else
+    hermes skills install "$ponytail_url" --yes 2>/dev/null && \
+      echo -e "  ${GREEN}✓ default: ponytail installed${NC}" || \
+      echo -e "  ${YELLOW}⚠ default: ponytail install failed${NC}"
+  fi
+
+  # Symlink to all other profiles (instant, no download/scan)
+  if [ -f "$ponytail_dir/SKILL.md" ]; then
+    for role in "${PROFILES[@]}"; do
+      local profile_skills="$(profile_path "$role")/skills"
+      local link_target="$profile_skills/ponytail"
+      mkdir -p "$profile_skills"
+      if [ -e "$link_target" ]; then
+        echo -e "  ${YELLOW}⊘ $role: ponytail already present${NC}"
+      else
+        ln -s "$ponytail_dir" "$link_target" && \
+          echo -e "  ${GREEN}✓ $role: ponytail symlinked${NC}" || \
+          echo -e "  ${YELLOW}⚠ $role: symlink failed${NC}"
+      fi
+    done
+  fi
 
   echo ""
 }
@@ -265,32 +284,50 @@ install_mcps() {
   echo -e "${CYAN}${BOLD}Phase 5: Installing MCP servers${NC}"
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  [dry-run] Would install Context7 + GitHub MCPs"
+    echo "  [dry-run] Would write MCP configs directly to config.yaml"
     return
   fi
 
+  # Write MCP configs directly to each profile's config.yaml.
+  # Skips the connection probe that `hermes mcp add` runs (saves ~3 min).
+  # MCPs connect on first session use instead.
+  local context7_config='mcp_servers:
+  context7:
+    command: "npx"
+    args: ["-y", "@upstash/context7-mcp"]
+    enabled: false
+    connect_timeout: 90'
+
+  local github_config='mcp_servers:
+  github:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    enabled: false
+    connect_timeout: 90'
+
   # Context7 for architect + builder
   for role in architect builder; do
-    if hermes -p "$role" mcp list 2>/dev/null | grep -qw "context7"; then
+    local cfg="$(profile_path "$role")/config.yaml"
+    if grep -qw "context7" "$cfg" 2>/dev/null; then
       echo -e "  ${YELLOW}⊘ $role: context7 already configured${NC}"
     else
-      echo "y" | hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" --connect-timeout 90 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: context7 MCP added${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: context7 MCP install failed${NC}"
+      echo "$context7_config" >> "$cfg"
+      echo -e "  ${GREEN}✓ $role: context7 MCP config written${NC}"
     fi
   done
 
-  # GitHub MCP for default, vcm, reviewer (not in catalog — install directly via npx)
+  # GitHub MCP for default, vcm, reviewer
   for role in default vcm reviewer; do
-    if hermes -p "$role" mcp list 2>/dev/null | grep -qw "github"; then
-      echo -e "  ${YELLOW}⊘ $role: github MCP already configured${NC}"
+    local cfg="$(profile_path "$role")/config.yaml"
+    if grep -qw "github" "$cfg" 2>/dev/null; then
+      echo -e "  ${YELLOW}⊘ $role: github already configured${NC}"
     else
-      echo "y" | hermes -p "$role" mcp add github --command "npx" --args "-y @modelcontextprotocol/server-github" --connect-timeout 90 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: github MCP added${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (set GITHUB_PERSONAL_ACCESS_TOKEN in .env)${NC}"
+      echo "$github_config" >> "$cfg"
+      echo -e "  ${GREEN}✓ $role: github MCP config written${NC}"
     fi
   done
 
+  echo -e "  ${CYAN}MCPs will connect on first session. Set GITHUB_PERSONAL_ACCESS_TOKEN in .env for GitHub MCP.${NC}"
   echo ""
 }
 
