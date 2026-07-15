@@ -1,0 +1,5 @@
+name: rudr9-guard
+version: "1.0.0"
+description: "RUDR9 authority enforcement — blocks tool calls that violate role boundaries"
+provides_hooks:
+  - pre_tool_call

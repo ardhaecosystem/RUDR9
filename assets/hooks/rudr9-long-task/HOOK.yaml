@@ -1,0 +1,4 @@
+name: rudr9-long-task
+description: Alert when a worker agent exceeds 15 tool-call iterations (potential stuck loop)
+events:
+  - agent:step
