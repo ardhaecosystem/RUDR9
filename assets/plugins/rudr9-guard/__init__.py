@@ -18,11 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_profile() -> str:
-    home = os.environ.get("HERMES_HOME", "")
-    if not home:
-        return "default"
-    name = os.path.basename(home.rstrip("/"))
-    return "default" if name == ".hermes" else name
+    """Identify the active profile. Hermes sets HERMES_PROFILE when spawning
+    workers (see kanban_db.py:8165). Fall back to 'default' if unset."""
+    return os.environ.get("HERMES_PROFILE", "default")
 
 
 def on_pre_tool_call(tool_name: str, params: dict, **kwargs):

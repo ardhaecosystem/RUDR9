@@ -143,7 +143,7 @@ create_profiles() {
     if hermes profile list 2>/dev/null | grep -qw "$role"; then
       echo -e "  ${YELLOW}⊘ $role already exists, skipping${NC}"
     else
-      hermes profile create "$role" --clone --description "${DESCRIPTIONS[$role]}" 2>/dev/null
+      hermes profile create "$role" --clone --description "${DESCRIPTIONS[$role]}" 2>/dev/null || true
       echo -e "  ${GREEN}✓ Created profile: $role${NC}"
     fi
   done
@@ -173,6 +173,11 @@ install_souls() {
       continue
     fi
 
+    # Back up existing SOUL.md before overwriting (non-destructive)
+    if [ -f "$soul_dst" ] && [ ! -f "${soul_dst}.rudr9-backup" ]; then
+      cp "$soul_dst" "${soul_dst}.rudr9-backup"
+    fi
+
     cp "$soul_src" "$soul_dst"
     echo -e "  ${GREEN}✓ SOUL.md → $role${NC}"
   done
@@ -193,8 +198,8 @@ configure_toolsets() {
   fi
 
   # Default (CTO): no file write, no terminal — router only
-  hermes tools disable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file disabled${NC}" || true
-  hermes tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal disabled${NC}" || true
+  hermes -p default tools disable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file disabled${NC}" || true
+  hermes -p default tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal disabled${NC}" || true
 
   # Planner: no terminal, no file
   hermes -p planner tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ planner: terminal disabled${NC}" || true
@@ -480,10 +485,18 @@ uninstall() {
   rm -rf "$HERMES_HOME/plugins/rudr9-guard" 2>/dev/null && \
     echo -e "  ${GREEN}✓ Removed rudr9-guard plugin${NC}" || true
 
-  # Reset default profile SOUL.md (backup first)
-  if [ -f "$HERMES_HOME/SOUL.md" ]; then
+  # Restore default profile: re-enable tools + restore original SOUL.md
+  echo -e "  ${YELLOW}Restoring default profile...${NC}"
+  hermes -p default tools enable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file re-enabled${NC}" || true
+  hermes -p default tools enable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal re-enabled${NC}" || true
+
+  # Restore original SOUL.md if backup exists
+  if [ -f "$HERMES_HOME/SOUL.md.rudr9-backup" ]; then
+    mv "$HERMES_HOME/SOUL.md.rudr9-backup" "$HERMES_HOME/SOUL.md" 2>/dev/null && \
+      echo -e "  ${GREEN}✓ Default SOUL.md restored from backup${NC}" || true
+  elif [ -f "$HERMES_HOME/SOUL.md" ]; then
     mv "$HERMES_HOME/SOUL.md" "$HERMES_HOME/SOUL.md.rudr9-backup" 2>/dev/null && \
-      echo -e "  ${GREEN}✓ Default SOUL.md backed up to SOUL.md.rudr9-backup${NC}" || true
+      echo -e "  ${YELLOW}⚠ No original backup found — current SOUL.md backed up${NC}" || true
   fi
 
   # Reset kanban config
