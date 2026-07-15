@@ -128,6 +128,34 @@ preflight() {
 }
 
 # ============================================================================
+# Phase 0.5: Seed default profile (before cloning so clones inherit skills)
+# ============================================================================
+
+seed_default() {
+  echo -e "${CYAN}${BOLD}Phase 0.5: Seeding default profile${NC}"
+
+  if [ "$DRY_RUN" = true ]; then
+    echo "  [dry-run] Would install ponytail to default (inherited by clones)"
+    return
+  fi
+
+  # Install ponytail ONCE on default. Clones created in Phase 1 inherit
+  # all skills from default. This avoids per-profile downloads + scans.
+  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
+  local ponytail_dir="$HERMES_HOME/skills/ponytail"
+
+  if [ -f "$ponytail_dir/SKILL.md" ]; then
+    echo -e "  ${YELLOW}⊘ default: ponytail already installed${NC}"
+  else
+    hermes skills install "$ponytail_url" --yes 2>/dev/null && \
+      echo -e "  ${GREEN}✓ default: ponytail installed (clones will inherit)${NC}" || \
+      echo -e "  ${YELLOW}⚠ default: ponytail install failed${NC}"
+  fi
+
+  echo ""
+}
+
+# ============================================================================
 # Phase 1: Profile Creation
 # ============================================================================
 
@@ -235,43 +263,34 @@ configure_toolsets() {
 # ============================================================================
 
 install_skills() {
-  echo -e "${CYAN}${BOLD}Phase 4: Installing skills${NC}"
+  echo -e "${CYAN}${BOLD}Phase 4: Reconciling skills${NC}"
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  [dry-run] Would install ponytail (once → symlink to all profiles)"
+    echo "  [dry-run] Would reconcile ponytail to any missing profiles"
     return
   fi
 
-  # Ponytail: install ONCE on default, then symlink to all other profiles.
-  # Saves ~3.5 min (avoids 7 redundant downloads + security scans).
-  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
-  local default_skills="$HERMES_HOME/skills"
-  local ponytail_dir="$default_skills/ponytail"
+  # Ponytail was seeded on default in Phase 0.5. Clones created in Phase 1
+  # inherited it. For re-runs where profiles already existed (pre-seed),
+  # copy the skill dir directly — no download, no scan.
+  local ponytail_src="$HERMES_HOME/skills/ponytail"
 
-  # Install once on default (this runs the security scan once)
-  if [ -f "$ponytail_dir/SKILL.md" ]; then
-    echo -e "  ${YELLOW}⊘ default: ponytail already installed${NC}"
-  else
-    hermes skills install "$ponytail_url" --yes 2>/dev/null && \
-      echo -e "  ${GREEN}✓ default: ponytail installed${NC}" || \
-      echo -e "  ${YELLOW}⚠ default: ponytail install failed${NC}"
+  if [ ! -d "$ponytail_src" ]; then
+    echo -e "  ${YELLOW}⚠ ponytail not found on default — skipping reconcile${NC}"
+    echo ""
+    return
   fi
 
-  # Symlink to all other profiles (instant, no download/scan)
-  if [ -f "$ponytail_dir/SKILL.md" ]; then
-    for role in "${PROFILES[@]}"; do
-      local profile_skills="$(profile_path "$role")/skills"
-      local link_target="$profile_skills/ponytail"
-      mkdir -p "$profile_skills"
-      if [ -e "$link_target" ]; then
-        echo -e "  ${YELLOW}⊘ $role: ponytail already present${NC}"
-      else
-        ln -s "$ponytail_dir" "$link_target" && \
-          echo -e "  ${GREEN}✓ $role: ponytail symlinked${NC}" || \
-          echo -e "  ${YELLOW}⚠ $role: symlink failed${NC}"
-      fi
-    done
-  fi
+  for role in "${PROFILES[@]}"; do
+    local dst="$(profile_path "$role")/skills/ponytail"
+    if [ -d "$dst" ]; then
+      echo -e "  ${YELLOW}⊘ $role: ponytail already present${NC}"
+    else
+      cp -r "$ponytail_src" "$dst" && \
+        echo -e "  ${GREEN}✓ $role: ponytail copied (no scan)${NC}" || \
+        echo -e "  ${YELLOW}⚠ $role: ponytail copy failed${NC}"
+    fi
+  done
 
   echo ""
 }
@@ -581,6 +600,7 @@ main() {
   fi
 
   preflight
+  seed_default
   create_profiles
   install_souls
   configure_toolsets
