@@ -1,0 +1,6 @@
+.git
+Architecture-Review.md
+Integration-Plan.md
+Notes.md
+__pycache__
+*.pyc

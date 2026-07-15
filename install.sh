@@ -143,7 +143,7 @@ create_profiles() {
     if hermes profile list 2>/dev/null | grep -qw "$role"; then
       echo -e "  ${YELLOW}⊘ $role already exists, skipping${NC}"
     else
-      hermes profile create "$role" --clone --description "${DESCRIPTIONS[$role]}" 2>/dev/null
+      hermes profile create "$role" --clone --description "${DESCRIPTIONS[$role]}" 2>/dev/null || true
       echo -e "  ${GREEN}✓ Created profile: $role${NC}"
     fi
   done
@@ -173,6 +173,11 @@ install_souls() {
       continue
     fi
 
+    # Back up existing SOUL.md before overwriting (non-destructive)
+    if [ -f "$soul_dst" ] && [ ! -f "${soul_dst}.rudr9-backup" ]; then
+      cp "$soul_dst" "${soul_dst}.rudr9-backup"
+    fi
+
     cp "$soul_src" "$soul_dst"
     echo -e "  ${GREEN}✓ SOUL.md → $role${NC}"
   done
@@ -193,8 +198,8 @@ configure_toolsets() {
   fi
 
   # Default (CTO): no file write, no terminal — router only
-  hermes tools disable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file disabled${NC}" || true
-  hermes tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal disabled${NC}" || true
+  hermes -p default tools disable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file disabled${NC}" || true
+  hermes -p default tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal disabled${NC}" || true
 
   # Planner: no terminal, no file
   hermes -p planner tools disable terminal 2>/dev/null && echo -e "  ${GREEN}✓ planner: terminal disabled${NC}" || true
@@ -238,14 +243,14 @@ install_skills() {
   fi
 
   # Ponytail to all profiles
-  local ponytail_url="github.com/DietrichGebert/ponytail"
+  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
   for role in default "${PROFILES[@]}"; do
     if hermes -p "$role" skills list 2>/dev/null | grep -qw "ponytail"; then
       echo -e "  ${YELLOW}⊘ $role: ponytail already installed${NC}"
     else
-      hermes -p "$role" skills install "$ponytail_url" --enable 2>/dev/null && \
+      hermes -p "$role" skills install "$ponytail_url" --yes 2>/dev/null && \
         echo -e "  ${GREEN}✓ $role: ponytail installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url)${NC}"
+        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url --yes)${NC}"
     fi
   done
 
@@ -269,20 +274,20 @@ install_mcps() {
     if hermes -p "$role" mcp list 2>/dev/null | grep -qw "context7"; then
       echo -e "  ${YELLOW}⊘ $role: context7 already configured${NC}"
     else
-      hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" 2>/dev/null && \
+      echo "y" | hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" --connect-timeout 90 2>/dev/null && \
         echo -e "  ${GREEN}✓ $role: context7 MCP added${NC}" || \
         echo -e "  ${YELLOW}⚠ $role: context7 MCP install failed${NC}"
     fi
   done
 
-  # GitHub MCP for default, vcm, reviewer
+  # GitHub MCP for default, vcm, reviewer (not in catalog — install directly via npx)
   for role in default vcm reviewer; do
     if hermes -p "$role" mcp list 2>/dev/null | grep -qw "github"; then
       echo -e "  ${YELLOW}⊘ $role: github MCP already configured${NC}"
     else
-      hermes -p "$role" mcp install github 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: github MCP installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (may need GITHUB_PERSONAL_ACCESS_TOKEN)${NC}"
+      echo "y" | hermes -p "$role" mcp add github --command "npx" --args "-y @modelcontextprotocol/server-github" --connect-timeout 90 2>/dev/null && \
+        echo -e "  ${GREEN}✓ $role: github MCP added${NC}" || \
+        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (set GITHUB_PERSONAL_ACCESS_TOKEN in .env)${NC}"
     fi
   done
 
@@ -480,10 +485,18 @@ uninstall() {
   rm -rf "$HERMES_HOME/plugins/rudr9-guard" 2>/dev/null && \
     echo -e "  ${GREEN}✓ Removed rudr9-guard plugin${NC}" || true
 
-  # Reset default profile SOUL.md (backup first)
-  if [ -f "$HERMES_HOME/SOUL.md" ]; then
+  # Restore default profile: re-enable tools + restore original SOUL.md
+  echo -e "  ${YELLOW}Restoring default profile...${NC}"
+  hermes -p default tools enable file 2>/dev/null && echo -e "  ${GREEN}✓ default: file re-enabled${NC}" || true
+  hermes -p default tools enable terminal 2>/dev/null && echo -e "  ${GREEN}✓ default: terminal re-enabled${NC}" || true
+
+  # Restore original SOUL.md if backup exists
+  if [ -f "$HERMES_HOME/SOUL.md.rudr9-backup" ]; then
+    mv "$HERMES_HOME/SOUL.md.rudr9-backup" "$HERMES_HOME/SOUL.md" 2>/dev/null && \
+      echo -e "  ${GREEN}✓ Default SOUL.md restored from backup${NC}" || true
+  elif [ -f "$HERMES_HOME/SOUL.md" ]; then
     mv "$HERMES_HOME/SOUL.md" "$HERMES_HOME/SOUL.md.rudr9-backup" 2>/dev/null && \
-      echo -e "  ${GREEN}✓ Default SOUL.md backed up to SOUL.md.rudr9-backup${NC}" || true
+      echo -e "  ${YELLOW}⚠ No original backup found — current SOUL.md backed up${NC}" || true
   fi
 
   # Reset kanban config
