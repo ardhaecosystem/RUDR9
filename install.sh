@@ -238,14 +238,14 @@ install_skills() {
   fi
 
   # Ponytail to all profiles
-  local ponytail_url="github.com/DietrichGebert/ponytail"
+  local ponytail_url="https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail/SKILL.md"
   for role in default "${PROFILES[@]}"; do
     if hermes -p "$role" skills list 2>/dev/null | grep -qw "ponytail"; then
       echo -e "  ${YELLOW}⊘ $role: ponytail already installed${NC}"
     else
-      hermes -p "$role" skills install "$ponytail_url" --enable 2>/dev/null && \
+      hermes -p "$role" skills install "$ponytail_url" --yes 2>/dev/null && \
         echo -e "  ${GREEN}✓ $role: ponytail installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url)${NC}"
+        echo -e "  ${YELLOW}⚠ $role: ponytail install failed (manual: hermes -p $role skills install $ponytail_url --yes)${NC}"
     fi
   done
 
@@ -269,20 +269,20 @@ install_mcps() {
     if hermes -p "$role" mcp list 2>/dev/null | grep -qw "context7"; then
       echo -e "  ${YELLOW}⊘ $role: context7 already configured${NC}"
     else
-      hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" 2>/dev/null && \
+      echo "y" | hermes -p "$role" mcp add context7 --command "npx" --args "-y @upstash/context7-mcp" --connect-timeout 90 2>/dev/null && \
         echo -e "  ${GREEN}✓ $role: context7 MCP added${NC}" || \
         echo -e "  ${YELLOW}⚠ $role: context7 MCP install failed${NC}"
     fi
   done
 
-  # GitHub MCP for default, vcm, reviewer
+  # GitHub MCP for default, vcm, reviewer (not in catalog — install directly via npx)
   for role in default vcm reviewer; do
     if hermes -p "$role" mcp list 2>/dev/null | grep -qw "github"; then
       echo -e "  ${YELLOW}⊘ $role: github MCP already configured${NC}"
     else
-      hermes -p "$role" mcp install github 2>/dev/null && \
-        echo -e "  ${GREEN}✓ $role: github MCP installed${NC}" || \
-        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (may need GITHUB_PERSONAL_ACCESS_TOKEN)${NC}"
+      echo "y" | hermes -p "$role" mcp add github --command "npx" --args "-y @modelcontextprotocol/server-github" --connect-timeout 90 2>/dev/null && \
+        echo -e "  ${GREEN}✓ $role: github MCP added${NC}" || \
+        echo -e "  ${YELLOW}⚠ $role: github MCP install failed (set GITHUB_PERSONAL_ACCESS_TOKEN in .env)${NC}"
     fi
   done
 
